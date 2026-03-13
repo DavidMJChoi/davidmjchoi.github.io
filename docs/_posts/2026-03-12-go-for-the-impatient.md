@@ -589,3 +589,258 @@ p("hello world")  // equivalent to fmt.Println("hello world")
 
 ## 8.2 匿名函数和闭包
 [TODO: ...]
+
+# 9 指针
+
+指针是存储了内存地址的变量：
+
+```go
+var p1 *int
+p2 := &a
+```
+
+`&` 运算符用以获取变量的地址；`*` 运算符则获取指针指向位置的值。
+
+Go 语言中不存在如下的**指针算术**：
+
+```c
+for (int i=0; i<3; i++) {
+	printf("%d\n",*ptr);
+	ptr++;
+}
+```
+
+`new` 内置函数用于分配内存并返回指向新分配的内存的指针。新分配的内存空间存储一个特定类型的值，零值初始化：
+
+```go
+p := new(string)
+fmt.Printf("%v\n", p)
+fmt.Printf("%v\n", *p)
+```
+
+# 10 方法
+
+方法是与一个特定类型关联的函数：
+
+```go
+func (t T) funcName(parameterList) (returnList) { /* ... */ }
+
+type Point struct { X, Y float64 }
+func (p Point) Distance(q Point) float64 {
+	return math.Hypot(q.X-p.X, q.Y-p.Y)
+}
+```
+
+- The method name is `Point.Distance`.
+- `t` is called the method’s **receiver**. In some other languages, …
+    
+    the receiver is implicit and is referred to as `this` or `self`.
+    
+
+Methods may be declared on **any named type** defined in the same package, as long as its underlying type is neither a **pointer** nor an **interface**.
+
+**调用**
+
+To call a method, “send” it to a receiver by using the **selector** syntax:
+
+```go
+p, q := Point{1,2}, Point{4,6}
+fmt.Println(p.Distance(q)) // "5"
+```
+
+**Name Space**
+
+Methods and struct fields of the same type share the same name space. 
+
+For example, declaring a method `X` of the type `Point` will be rejected by the compiler:
+
+```
+./pg.go:17:16: field and method with the same name X
+        ./pg.go:11:20: other declaration of X
+```
+
+Every type has its own name space, so different types may have methods/fields that have the same name.
+
+# 11 接口
+
+接口是声明了一系列方法的**抽象类型**。当类型 `T` 实现了接口 `I` 声明的所有方法，则称类型 `T` 实现了接口 `I`。`T` 是接口 `I` 的一个实例，称作**具体类型**。
+
+## 11.1 接口类型
+
+一个**接口类型**指定了一系列方法：
+
+```go
+interface {
+	// abstract methods ...
+}
+
+interface{} // no method. any.
+```
+
+## 11.2 断言
+
+考虑下例：
+
+```go
+func main() {
+	a := 1
+	var i any = a
+	var b int = i 
+	// ./main.go:8:14: cannot use i (variable of interface type any) 
+	// as int value in variable declaration: need type assertion
+
+	fmt.Println(a, i, b)
+}
+```
+
+- `any` 类型的变量可以接受任意类型的值；
+- 要将 `any` 类型的值赋给其他任意非 `any` 类型时，则需要使用**类型断言**，即说清楚要用做什么类型的值。
+
+```go
+var b int = i.(int)
+```
+
+类型断言作用于**接口**，用于检查接口变量的值是否实现了某个接口，或是否为某个具体类型：
+
+```go
+v, ok := x.(T)
+```
+
+- 不能将 `nil` 断言为任何类型，即 `ok` 总为 `false`。
+
+断言和实际类型不匹配会导致 panic：
+
+```go
+var x any = "hello"
+val := x.(int)
+fmt.Println(val)
+```
+
+```
+panic: interface conversion: interface {} is string, not int
+```
+
+# 12 `error`
+
+```go
+type error interface {
+	Error() string // returns an error message
+}
+```
+
+These are all the code in `errors/errors.go`:
+
+```go
+package errors
+
+func New(text string) error {	return &errorString{text} }
+type errorString struct {	s string }
+func (e *errorString) Error() string { return e.s }
+var ErrUnsupported = New("unsupported operation")
+```
+
+- Every call to `New` allocates a distinct `error` instance:
+
+```go
+fmt.Println(errors.New("EOF") == errors.New("EOF")) // "false"
+```
+
+`errors.New` is seldom directly used because there’s a convenient wrapper function `fmt.Errorf`.
+
+## 12.1 自定义错误对象
+
+```go
+type MyError struct {
+	code int
+	msg string
+}
+
+func (m MyError) Error() string {
+	return fmt.Sprintf("code:%d,msg:%v", m.code, m.msg)
+}
+func NewError(code int, msg string) error {
+	return MyError{code: code, msg: msg}
+}
+func Code(err error) int {
+	if e, ok := err.(MyError); ok {
+		return e.code
+	}
+	return -1
+}
+func Msg(err error) string {
+	if e, ok := err.(MyError); ok {
+		return e.msg
+	}
+	return ""
+}
+```
+
+# 13 Defer
+
+> As functions grow more complex and have to handle more errors, **clean-up logic** and **release of resources** may become a maintenance problem.
+> 
+
+`defer` 语句是由关键字 `defer` 前缀的函数调用。函数以及实参表达式会在 `defer` 语句执行时求值，但实际的函数调用会被延迟到**包含 `defer` 语句的函数**执行完毕后。
+
+- Panic 时会执行所有 `defer` 的函数调用。
+
+```go
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Fatalf("fetch failed: %v", err)
+	}
+	defer resp.Body.Close()
+```
+
+多个 `defer` 的函数调用会根据对应 `defer` 语句出现的顺序逆序执行，即最先 `defer` 的函数最后调用（Last In First Out）。
+
+**Using** `defer`**: “On entry” and “On exit” actions**
+
+```go
+func main() {
+	defer trace("bigSlowOp")()
+	// lots of work ...
+	time.Sleep(5 * time.Second)
+}
+
+func trace(msg string) func() {
+	start := time.Now()
+
+	// "on entry" actions here
+	log.Printf("enter %s\n", msg)
+	
+	// "on exit" actions
+	return func() {
+		log.Printf("exit %s (%s)\n", msg, time.Since(start))
+	}
+}
+```
+
+On entry → `trace()` is evaluated when execution reaches `defer`. 
+
+On exit → The function returned by `trace()` is called  until `main()` has finished.
+
+**Using** `defer`**: Work on returned values**
+
+By naming the return variable and adding a `defer`, a function can be made to print its arguments and returned values.
+
+```go
+func double(x int) (result int) {
+	defer func() { fmt.Printf("double(%v) = %v\n", x, result) }()
+	return x + x
+}
+// ...
+_ = double(4) // "double(4) = 8"
+```
+
+Thie mechanism can even be used to modify the return value:
+
+```go
+// not a good practice! just to demonstrate.
+func tripe(x int) (result int) {
+	defer func() { result += x }()
+	return x + x
+}
+```
+
+- `return` 不是原子操作，其包含三部分：设置返回值，执行 `defer` 函数，返回结果。
